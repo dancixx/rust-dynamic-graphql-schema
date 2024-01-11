@@ -10,9 +10,11 @@ use axum::{
     Router,
 };
 use chrono::DateTime;
-use std::{collections::HashMap, error::Error, time::SystemTime};
+use std::{collections::HashMap, env, error::Error, time::SystemTime};
 use tokio::net::TcpListener;
 use tokio_postgres::{NoTls, Row};
+use tracing::Level;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 pub struct QueryRoot;
 
@@ -29,11 +31,23 @@ async fn graphiql() -> impl IntoResponse {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    dotenvy::dotenv()?;
     // Initialize the logger
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::filter::LevelFilter::from_level(
+            Level::DEBUG,
+        ))
+        .with(tracing_subscriber::fmt::layer())
+        .init();
 
-    let (client, connection) =
-        tokio_postgres::connect("host={} user={} password={} port={}", NoTls).await?;
+    let c_string = format!(
+        "host={} user={} password={} port={}",
+        env::var("DB_HOST").unwrap(),
+        env::var("DB_USER").unwrap(),
+        env::var("DB_PASSWORD").unwrap(),
+        env::var("DB_PORT").unwrap()
+    );
+    let (client, connection) = tokio_postgres::connect(&c_string, NoTls).await?;
 
     tokio::spawn(async move {
         if let Err(e) = connection.await {
@@ -46,7 +60,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             r#"
                 SELECT table_name, string_agg(column_name, ', ') AS columns
                 FROM information_schema.columns
-                WHERE table_schema = 'public'
+                WHERE table_schema = 'noexapp'
                 GROUP BY table_name
                 ORDER BY table_name;
             "#,
@@ -98,7 +112,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     let fields_to_string = fields.join(", ");
 
                     let query_params = format!(
-                        "SELECT {} FROM public.{} LIMIT 100;",
+                        "SELECT {} FROM noexapp.{} LIMIT 100;",
                         fields_to_string, table_name
                     );
                     let query = client.query(&query_params, &[]).await?;
