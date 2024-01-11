@@ -6,6 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+anyhow = "1.0.79"
 async-graphql = { version = "7.0.0", default-features = true, features = ["dynamic-schema"]}
 async-graphql-axum = "7.0.0"
 axum = "0.7.3"

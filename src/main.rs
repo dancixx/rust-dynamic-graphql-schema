@@ -1,7 +1,8 @@
+use crate::postgres::reflective_get;
 use async_graphql::{
     dynamic::{self, Field, FieldFuture, FieldValue, Object, TypeRef},
     http::GraphiQLSource,
-    Object, Value,
+    Value,
 };
 use async_graphql_axum::GraphQL;
 use axum::{
@@ -9,21 +10,12 @@ use axum::{
     routing::get,
     Router,
 };
-use chrono::DateTime;
-use std::{collections::HashMap, env, error::Error, time::SystemTime};
+use std::{collections::HashMap, error::Error};
 use tokio::net::TcpListener;
-use tokio_postgres::{NoTls, Row};
 use tracing::Level;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-pub struct QueryRoot;
-
-#[Object]
-impl QueryRoot {
-    async fn new(&self) -> &str {
-        "hello world"
-    }
-}
+mod postgres;
 
 async fn graphiql() -> impl IntoResponse {
     Html(GraphiQLSource::build().endpoint("/").finish())
@@ -39,21 +31,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         ))
         .with(tracing_subscriber::fmt::layer())
         .init();
-
-    let c_string = format!(
-        "host={} user={} password={} port={}",
-        env::var("DB_HOST").unwrap(),
-        env::var("DB_USER").unwrap(),
-        env::var("DB_PASSWORD").unwrap(),
-        env::var("DB_PORT").unwrap()
-    );
-    let (client, connection) = tokio_postgres::connect(&c_string, NoTls).await?;
-
-    tokio::spawn(async move {
-        if let Err(e) = connection.await {
-            eprintln!("connection error: {}", e);
-        }
-    });
+    let client = postgres::connector().await?;
 
     let tables = client
         .query(
@@ -161,65 +139,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let mut dyn_schema = dynamic::Schema::build(query.type_name(), None, None);
-
     for q in qs {
         dyn_schema = dyn_schema.register(q);
     }
 
-    // let mutation = Object::new("Mutation");
-
     let dyn_schema = dyn_schema.register(query).data(client).finish()?;
-
-    // let dyn_schema = dynamic::Schema::build(query, None, None);
-    // let schema = Schema::build(QueryRoot, EmptyMutation, EmptySubscription).finish();
     let app = Router::new().route("/", get(graphiql).post_service(GraphQL::new(dyn_schema)));
-
     let listener = TcpListener::bind("127.0.0.1:8000").await?;
     tracing::info!("listening on {}", listener.local_addr()?);
     axum::serve(listener, app).await?;
     Ok(())
-}
-
-pub fn reflective_get(row: &Row, index: usize) -> String {
-    let column_type = row.columns().get(index).map(|c| c.type_().name()).unwrap();
-    // see https://docs.rs/sqlx/0.4.0-beta.1/sqlx/postgres/types/index.html
-
-    let value = match column_type {
-        "bool" => {
-            let v = row.get::<_, Option<bool>>(index);
-            v.map(|v| v.to_string())
-        }
-        "varchar" | "char(n)" | "text" | "name" => row.get(index),
-        // "char" => {
-        //     let v: i8 = row.get(index);
-        // }
-        "int2" | "smallserial" | "smallint" => {
-            let v = row.get::<_, Option<i16>>(index);
-            v.map(|v| v.to_string())
-        }
-        "int" | "int4" | "serial" => {
-            let v = row.get::<_, Option<i32>>(index);
-            v.map(|v| v.to_string())
-        }
-        "int8" | "bigserial" | "bigint" => {
-            let v = row.get::<_, Option<i64>>(index);
-            v.map(|v| v.to_string())
-        }
-        "float4" | "real" => {
-            let v = row.get::<_, Option<f32>>(index);
-            v.map(|v| v.to_string())
-        }
-        "float8" | "double precision" => {
-            let v = row.get::<_, Option<f64>>(index);
-            v.map(|v| v.to_string())
-        }
-        "timestamp" | "timestamptz" => {
-            // with-chrono feature is needed for this
-            let v: Option<SystemTime> = row.get(index);
-            let v = DateTime::<chrono::Utc>::from(v.unwrap());
-            Some(v.to_string())
-        }
-        &_ => Some("CANNOT PARSE".to_string()),
-    };
-    value.unwrap_or("null".to_string())
 }
