@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, env, time::SystemTime};
+use std::{collections::HashMap, env, time::SystemTime};
 
 use anyhow::Result;
 use chrono::DateTime;
@@ -50,7 +50,7 @@ pub async fn get_tables(client: &Client) -> Result<Vec<(String, Vec<String>)>> {
     Ok(tables)
 }
 
-pub async fn get_relations(client: &Client) -> Result<BTreeMap<String, Vec<String>>> {
+pub async fn get_relations(client: &Client) -> Result<HashMap<String, Vec<String>>> {
     let relations = client
         .query(
             r#"
@@ -82,7 +82,7 @@ pub async fn get_relations(client: &Client) -> Result<BTreeMap<String, Vec<Strin
         .collect::<Vec<_>>();
 
     // group by table name
-    let mut relations = BTreeMap::<String, Vec<String>>::new();
+    let mut relations = HashMap::<String, Vec<String>>::new();
     for (table, foreign_table) in relation_by_tables {
         let mut found = false;
         for (table_name, foreign_tables) in relations.iter_mut() {
