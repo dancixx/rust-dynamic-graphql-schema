@@ -32,45 +32,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .with(tracing_subscriber::fmt::layer())
         .init();
     let client = postgres::connector().await?;
+    let tables = postgres::get_tables(&client).await?;
+    let relations = postgres::get_relations(&client).await?;
 
-    let tables = client
-        .query(
-            r#"
-                SELECT table_name, string_agg(column_name, ', ') AS columns
-                FROM information_schema.columns
-                WHERE table_schema = 'noexapp'
-                GROUP BY table_name
-                ORDER BY table_name;
-            "#,
-            &[],
-        )
-        .await?;
-
-    let tables = tables
-        .iter()
-        .map(|row| {
-            let table_name: &str = row.get(0);
-            let columns: &str = row.get(1);
-            (table_name, columns.split(", ").collect::<Vec<_>>())
-        })
-        .collect::<Vec<_>>();
-
-    // generate graphql schema from tables
-
-    let tables = tables
-        .iter()
-        .map(|(table_name, columns)| {
-            let columns = columns
-                .iter()
-                .map(|column| {
-                    let column = column.to_string();
-                    let column = column.replace(" ", "_");
-                    column
-                })
-                .collect::<Vec<_>>();
-            (table_name.to_string(), columns)
-        })
-        .collect::<Vec<_>>();
     let mut query = Object::new("Query");
     let mut qs = Vec::new();
 
@@ -118,21 +82,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
         ));
 
         for column in columns.iter() {
-            q = q.field(Field::new(column, TypeRef::named(TypeRef::STRING), {
-                let column = column.clone();
-                move |ctx| {
+            q = q.field(Field::new(
+                column.to_string(),
+                TypeRef::named(TypeRef::STRING),
+                {
                     let column = column.clone();
-                    FieldFuture::new(async move {
-                        let values = ctx
-                            .parent_value
-                            .downcast_ref::<HashMap<String, String>>()
-                            .unwrap()
-                            .clone();
-                        let value = values.get(&column).unwrap().clone();
-                        Ok(Some(Value::String(value)))
-                    })
-                }
-            }));
+                    move |ctx| {
+                        let column = column.clone();
+                        FieldFuture::new(async move {
+                            let values = ctx
+                                .parent_value
+                                .downcast_ref::<HashMap<String, String>>()
+                                .unwrap()
+                                .clone();
+                            let value = values.get(&column).unwrap().clone();
+                            Ok(Some(Value::String(value)))
+                        })
+                    }
+                },
+            ));
         }
 
         qs.push(q);

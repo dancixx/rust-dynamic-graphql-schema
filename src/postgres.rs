@@ -1,4 +1,4 @@
-use std::{env, time::SystemTime};
+use std::{collections::HashMap, env, time::SystemTime};
 
 use anyhow::Result;
 use chrono::DateTime;
@@ -21,6 +21,100 @@ pub async fn connector() -> Result<Client> {
     });
 
     Ok(client)
+}
+
+pub async fn get_tables(client: &Client) -> Result<Vec<(String, Vec<String>)>> {
+    let tables = client
+        .query(
+            r#"
+                SELECT table_name, string_agg(column_name, ', ') AS columns
+                FROM information_schema.columns
+                WHERE table_schema = 'noexapp'
+                GROUP BY table_name
+                ORDER BY table_name;
+            "#,
+            &[],
+        )
+        .await?;
+
+    let tables = tables
+        .iter()
+        .map(|row| {
+            let table = row.get::<_, String>(0);
+            let cols = row.get::<_, String>(1);
+            let cols = cols.split(", ").map(String::from).collect::<Vec<String>>();
+            (table, cols)
+        })
+        .collect::<Vec<_>>();
+
+    Ok(tables)
+}
+
+pub async fn get_relations(client: &Client) -> Result<HashMap<String, Vec<String>>> {
+    let relations = client
+        .query(
+            r#"
+                SELECT tc.constraint_name, tc.table_name, kcu.column_name, 
+                ccu.table_name AS foreign_table_name,
+                ccu.column_name AS foreign_column_name 
+                FROM information_schema.table_constraints AS tc 
+                JOIN information_schema.key_column_usage AS kcu
+                ON tc.constraint_name = kcu.constraint_name
+                JOIN information_schema.constraint_column_usage AS ccu
+                ON ccu.constraint_name = tc.constraint_name
+                WHERE constraint_type = 'FOREIGN KEY';
+            "#,
+            &[],
+        )
+        .await?;
+
+    let relation_by_tables = relations
+        .iter()
+        .map(|row| {
+            let _constraint_name = row.get::<_, String>(0);
+            let table = row.get::<_, String>(1);
+            let _col_name = row.get::<_, String>(2);
+            let foreign_table = row.get::<_, String>(3);
+            let _foreign_col_name = row.get::<_, String>(4);
+
+            (table, foreign_table)
+        })
+        .collect::<Vec<_>>();
+
+    // group by table name
+    let mut relations = HashMap::<String, Vec<String>>::new();
+    for (table, foreign_table) in relation_by_tables {
+        let mut found = false;
+        for (table_name, foreign_tables) in relations.iter_mut() {
+            if table_name == &table {
+                found = true;
+                foreign_tables.push(foreign_table.clone());
+            }
+        }
+        if !found {
+            relations.insert(table, vec![foreign_table]);
+        }
+    }
+    // relation_by_tables.into_iter().fold(
+    //     Vec::<(String, Vec<String>)>::new(),
+    //     |mut acc, (table, foreign_table)| {
+    //         let mut found = false;
+    //         for (table_name, foreign_tables) in acc.iter_mut() {
+    //             if table_name == &table {
+    //                 found = true;
+    //                 foreign_tables.push(foreign_table.clone());
+    //             }
+    //         }
+    //         if !found {
+    //             acc.push((table, vec![foreign_table]));
+    //         }
+    //         acc
+    //     },
+    // );
+
+    println!("{:?}", relations);
+
+    Ok(relations)
 }
 
 pub fn reflective_get(row: &Row, index: usize) -> String {
