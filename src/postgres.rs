@@ -1,4 +1,8 @@
-use std::{collections::HashMap, env, time::SystemTime};
+use std::{
+    collections::{BTreeMap, HashMap},
+    env,
+    time::SystemTime,
+};
 
 use anyhow::Result;
 use chrono::DateTime;
@@ -23,8 +27,8 @@ pub async fn connector() -> Result<Client> {
     Ok(client)
 }
 
-pub async fn get_tables(client: &Client) -> Result<Vec<(String, Vec<String>)>> {
-    let tables = client
+pub async fn get_tables(client: &Client) -> Result<BTreeMap<String, Vec<String>>> {
+    let query = client
         .query(
             r#"
                 SELECT table_name, string_agg(column_name, ', ') AS columns
@@ -37,20 +41,18 @@ pub async fn get_tables(client: &Client) -> Result<Vec<(String, Vec<String>)>> {
         )
         .await?;
 
-    let tables = tables
-        .iter()
-        .map(|row| {
-            let table = row.get::<_, String>(0);
-            let cols = row.get::<_, String>(1);
-            let cols = cols.split(", ").map(String::from).collect::<Vec<String>>();
-            (table, cols)
-        })
-        .collect::<Vec<_>>();
+    let mut tables = BTreeMap::new();
+    for row in query.iter() {
+        let table = row.get::<_, String>(0);
+        let cols = row.get::<_, String>(1);
+        let cols = cols.split(", ").map(String::from).collect::<Vec<String>>();
+        tables.insert(table, cols);
+    }
 
     Ok(tables)
 }
 
-pub async fn get_relations(client: &Client) -> Result<HashMap<String, Vec<String>>> {
+pub async fn get_relations(client: &Client) -> Result<HashMap<String, Vec<(String, String)>>> {
     let relations = client
         .query(
             r#"
@@ -73,29 +75,38 @@ pub async fn get_relations(client: &Client) -> Result<HashMap<String, Vec<String
         .map(|row| {
             let _constraint_name = row.get::<_, String>(0);
             let table = row.get::<_, String>(1);
-            let _col_name = row.get::<_, String>(2);
+            let col_name = row.get::<_, String>(2);
             let foreign_table = row.get::<_, String>(3);
-            let _foreign_col_name = row.get::<_, String>(4);
+            let foreign_col_name = row.get::<_, String>(4);
 
-            (table, foreign_table)
+            ((table, col_name), (foreign_table, foreign_col_name))
         })
         .collect::<Vec<_>>();
 
     // group by table name
-    let mut relations = HashMap::<String, Vec<String>>::new();
+    let mut relations = HashMap::<String, Vec<(String, String)>>::new();
     for (table, foreign_table) in relation_by_tables {
         let mut found = false;
         for (table_name, foreign_tables) in relations.iter_mut() {
-            if table_name == &table {
+            if table_name == &table.0 {
                 found = true;
-                foreign_tables.push(foreign_table.clone());
+                foreign_tables.push((
+                    format!("{}_{}", &table.0, &table.1),
+                    format!("{}", &foreign_table.0),
+                ));
             }
         }
         if !found {
-            relations.insert(table, vec![foreign_table]);
+            relations.insert(
+                format!("{}", &table.0),
+                vec![(
+                    format!("{}_{}", &table.0, &table.1),
+                    format!("{}", &foreign_table.0),
+                )],
+            );
         }
     }
-
+    println!("{:?}", relations);
     Ok(relations)
 }
 

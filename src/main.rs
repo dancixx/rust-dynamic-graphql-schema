@@ -15,6 +15,7 @@ use tokio::net::TcpListener;
 use tracing::Level;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+mod graphql_schema;
 mod postgres;
 
 async fn graphiql() -> impl IntoResponse {
