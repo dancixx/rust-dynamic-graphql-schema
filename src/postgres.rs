@@ -8,15 +8,29 @@ use anyhow::Result;
 use chrono::DateTime;
 use tokio_postgres::{Client, NoTls, Row};
 
-pub async fn connector() -> Result<Client> {
+use crate::error::{ConnectionError, DriverError, EnvironmentError};
+
+pub async fn connector<'a>() -> Result<Client, DriverError<'a>> {
     let c_string = format!(
         "host={} user={} password={} port={}",
-        env::var("DB_HOST")?,
-        env::var("DB_USER")?,
-        env::var("DB_PASSWORD")?,
-        env::var("DB_PORT")?
+        env::var("DB_HOST").map_err(|_| DriverError::EnvironmentError(
+            EnvironmentError::MissingEnvironmentVariable("Missing environment variable DB_HOST")
+        ))?,
+        env::var("DB_USER").map_err(|_| DriverError::EnvironmentError(
+            EnvironmentError::MissingEnvironmentVariable("Missing environment variable DB_USER")
+        ))?,
+        env::var("DB_PASSWORD").map_err(|_| DriverError::EnvironmentError(
+            EnvironmentError::MissingEnvironmentVariable(
+                "Missing environment variable DB_PASSWORD"
+            )
+        ))?,
+        env::var("DB_PORT").map_err(|_| DriverError::EnvironmentError(
+            EnvironmentError::MissingEnvironmentVariable("Missing environment variable DB_PORT")
+        ))?,
     );
-    let (client, connection) = tokio_postgres::connect(&c_string, NoTls).await?;
+    let (client, connection) = tokio_postgres::connect(&c_string, NoTls)
+        .await
+        .map_err(|e| DriverError::ConnectionError(ConnectionError::PostgresError(e)))?;
 
     tokio::spawn(async move {
         if let Err(e) = connection.await {

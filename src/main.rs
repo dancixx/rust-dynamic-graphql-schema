@@ -1,4 +1,5 @@
 use crate::postgres::reflective_get;
+use anyhow::Result;
 use async_graphql::{
     dynamic::{self, Field, FieldFuture, FieldValue, Object, TypeRef},
     http::GraphiQLSource,
@@ -15,6 +16,7 @@ use tokio::net::TcpListener;
 use tracing::Level;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+mod error;
 mod graphql_schema;
 mod postgres;
 
@@ -23,7 +25,7 @@ async fn graphiql() -> impl IntoResponse {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+async fn main() -> Result<()> {
     dotenvy::dotenv()?;
     // Initialize the logger
     tracing_subscriber::registry()
