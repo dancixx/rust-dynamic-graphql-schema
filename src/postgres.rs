@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     collections::{BTreeMap, HashMap},
     env,
     time::SystemTime,
@@ -41,11 +42,12 @@ pub async fn connector<'a>() -> Result<Client, DriverError<'a>> {
     Ok(client)
 }
 
-pub async fn get_tables(client: &Client) -> Result<BTreeMap<String, Vec<String>>> {
+pub async fn get_tables(client: &Client) -> Result<BTreeMap<String, Vec<(String, String)>>> {
     let query = client
         .query(
             r#"
-                SELECT table_name, string_agg(column_name, ', ') AS columns
+                SELECT table_name, 
+                    string_agg(column_name || ':' || data_type, ', ') AS columns
                 FROM information_schema.columns
                 WHERE table_schema = 'noexapp'
                 GROUP BY table_name
@@ -59,7 +61,13 @@ pub async fn get_tables(client: &Client) -> Result<BTreeMap<String, Vec<String>>
     for row in query.iter() {
         let table = row.get::<_, String>(0);
         let cols = row.get::<_, String>(1);
-        let cols = cols.split(", ").map(String::from).collect::<Vec<String>>();
+        let cols = cols.split(", ");
+        let cols = cols
+            .map(|c| {
+                let c = c.split(':').collect::<Vec<&str>>();
+                (c[0].to_string(), c[1].to_string())
+            })
+            .collect::<Vec<(String, String)>>();
         tables.insert(table, cols);
     }
 
