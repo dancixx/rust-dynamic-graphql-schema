@@ -1,20 +1,33 @@
 use std::collections::BTreeMap;
 
-use async_graphql::dynamic::{Interface, InterfaceField, TypeRef};
+use anyhow::Ok;
+use async_graphql::{
+    dynamic::{Field, FieldFuture, FieldValue, Interface, InterfaceField, Object, TypeRef},
+    Value,
+};
+
+use crate::postgres::reflective_get;
+
+// pub fn generate_query_dyn_schema(
+//     query: &mut Object,
+//     tables: BTreeMap<String, Vec<(String, String)>>,
+// ) {
+
+// }
 
 pub fn generate_table_interfaces(
     tables: BTreeMap<String, Vec<(String, String)>>,
-) -> Vec<Interface> {
-    let mut interfaces = Vec::new();
+) -> BTreeMap<String, Interface> {
+    let mut interfaces = BTreeMap::new();
 
     for (table_name, cols) in tables {
-        let mut interface = Interface::new(table_name);
+        let mut interface = Interface::new(table_name.clone());
 
         for col in cols {
             interface = interface.field(InterfaceField::new(col.0, col_type(&col.1)));
         }
 
-        interfaces.push(interface);
+        interfaces.insert(table_name, interface);
     }
 
     interfaces

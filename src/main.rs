@@ -38,10 +38,19 @@ async fn main() -> Result<()> {
     println!("Connected to database");
     let tables = postgres::get_tables(&client).await?;
     let interfaces = graphql_schema::generate_table_interfaces(tables.clone());
-    println!("{:?}", interfaces[0]);
-    let relations = postgres::get_relations(&client).await?;
 
     let mut query = Object::new("Query");
+    let mut dyn_schema = dynamic::Schema::build(query.type_name(), None, None);
+    for (_, interface) in interfaces {
+        dyn_schema = dyn_schema.register(interface);
+    }
+
+    // let query = graphql_schema::generate_query_dyn_schema(&mut query, tables.clone());
+    // let interfaces = graphql_schema::generate_table_interfaces(tables.clone());
+
+    // let relations = postgres::get_relations(&client).await?;
+
+    //let mut query = Object::new("Query");
     // let mut qs = Vec::new();
 
     // for (table_name, columns) in tables {
@@ -111,7 +120,7 @@ async fn main() -> Result<()> {
 
     //     qs.push(q);
     // }
-    let mut dyn_schema = dynamic::Schema::build(query.type_name(), None, None);
+
     // for q in qs {
     //     let foreign_keys = relations.get(q.type_name());
     //     let foreign_keys = match foreign_keys {
@@ -202,6 +211,7 @@ async fn main() -> Result<()> {
     //     dyn_schema = dyn_schema.register(q);
     // }
 
+    println!("{:?}", query.type_name());
     let dyn_schema = dyn_schema.register(query).data(client).finish()?;
     let app = Router::new().route("/", get(graphiql).post_service(GraphQL::new(dyn_schema)));
     let listener = TcpListener::bind("127.0.0.1:8000").await?;
