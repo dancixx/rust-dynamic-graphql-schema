@@ -1,11 +1,16 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
+use anyhow::Result;
 use async_graphql::{
     dynamic::{Field, FieldFuture, FieldValue, Interface, InterfaceField, Object, TypeRef},
     Value,
 };
+use tokio_postgres::Client;
 
-use crate::utils::{col_type, reflective_get};
+use crate::{
+    postgres::get_relations,
+    utils::{col_type, reflective_get},
+};
 
 pub fn generate_query_root(tables: BTreeMap<String, Vec<(String, String)>>) -> Vec<Field> {
     let mut fields = Vec::with_capacity(tables.len());
@@ -20,17 +25,41 @@ pub fn generate_query_root(tables: BTreeMap<String, Vec<(String, String)>>) -> V
                     let client = ctx.data::<tokio_postgres::Client>()?;
                     let field = ctx.field().selection_set();
                     let fields = field.into_iter().map(|f| f.name()).collect::<Vec<_>>();
-                    let fields_to_string = fields.join(", ");
+                    let join_fields = fields
+                        .iter()
+                        .filter(|f| f.contains("_join_on_"))
+                        .map(|f| f.to_string())
+                        .collect::<Vec<_>>();
+                    let non_join_fields = fields
+                        .iter()
+                        .filter(|f| !f.contains("_join_on_"))
+                        .map(|f| f.to_string())
+                        .collect::<Vec<_>>();
+                    let non_join_fields = non_join_fields.join(", ");
 
-                    let query_params = format!(
-                        "SELECT {} FROM noexapp.{} LIMIT 100;",
-                        fields_to_string, table_name
+                    let mut query_params = format!(
+                        "SELECT {} FROM noexapp.{} LIMIT 100",
+                        non_join_fields, table_name
                     );
+
+                    // TODO: handle join fields
+                    if !join_fields.is_empty() {
+                        for join_field in join_fields {
+                            let join_field = join_field.split("_join_on_").collect::<Vec<_>>();
+                            let join_table = join_field[0];
+                            let join_column = join_field[1];
+                            query_params.push_str(&format!(
+                                " JOIN noexapp.{} ON {}.{} = {}.{}",
+                                join_table, table_name, join_column, join_table, join_column
+                            ));
+                        }
+                    }
+
                     let query = client.query(&query_params, &[]).await?;
                     let rows = query
                         .iter()
                         .map(|row| {
-                            let mut vals = HashMap::new();
+                            let mut vals = BTreeMap::new();
                             let cols = row.columns();
 
                             for i in 0..row.len() {
@@ -39,7 +68,7 @@ pub fn generate_query_root(tables: BTreeMap<String, Vec<(String, String)>>) -> V
                             }
                             vals
                         })
-                        .collect::<Vec<HashMap<String, String>>>();
+                        .collect::<Vec<BTreeMap<String, String>>>();
 
                     let list = rows
                         .into_iter()
@@ -56,15 +85,29 @@ pub fn generate_query_root(tables: BTreeMap<String, Vec<(String, String)>>) -> V
     fields
 }
 
-pub fn generate_table_schemas(
+pub async fn generate_table_schemas(
     interfaces: BTreeMap<String, Interface>,
     tables: BTreeMap<String, Vec<(String, String)>>,
-) -> Vec<Object> {
+    client: &Client,
+) -> Result<Vec<Object>> {
     let mut objects = Vec::with_capacity(interfaces.len());
+    let relations = get_relations(client).await.unwrap();
 
     for (table, interface) in interfaces {
         let mut object = Object::new(table.as_str()).implement(interface.type_name());
-        let cols = tables.get(table.as_str()).unwrap();
+        let mut cols = tables.get(table.as_str()).unwrap().to_vec();
+        let foreign_keys = relations.get(table.as_str());
+        let foreign_keys = match foreign_keys {
+            Some(fk) => fk
+                .to_vec()
+                .iter()
+                .map(|f| (format!("{}_join_on_{}", f.0, f.1), f.1.to_string()))
+                .collect(),
+            None => vec![],
+        };
+        cols.extend(foreign_keys);
+        cols.sort();
+
         for column in cols.iter() {
             object = object.field(Field::new(column.0.to_string(), col_type(&column.1), {
                 let column = column.clone();
@@ -73,17 +116,21 @@ pub fn generate_table_schemas(
                     FieldFuture::new(async move {
                         let values = ctx
                             .parent_value
-                            .downcast_ref::<HashMap<String, String>>()
+                            .downcast_ref::<BTreeMap<String, String>>()
                             .unwrap()
                             .clone();
                         let value = values.get(&column.0).unwrap().clone();
                         let col_type = col_type(&column.1);
 
+                        if value == "NULL" {
+                            return Ok(Some(Value::Null));
+                        }
+
                         match col_type {
                             TypeRef::Named(name) => match name.as_ref() {
                                 TypeRef::INT => Ok(Some(Value::Number(value.parse().unwrap()))),
                                 TypeRef::FLOAT => Ok(Some(Value::Number(value.parse().unwrap()))),
-                                TypeRef::ID => Ok(Some(Value::String(value))),
+                                TypeRef::ID => Ok(Some(Value::Number(value.parse().unwrap()))),
                                 TypeRef::STRING => Ok(Some(Value::String(value))),
                                 TypeRef::BOOLEAN => {
                                     Ok(Some(Value::Boolean(if value == String::from("true") {
@@ -100,10 +147,11 @@ pub fn generate_table_schemas(
                 }
             }));
         }
+
         objects.push(object);
     }
 
-    objects
+    Ok(objects)
 }
 
 pub fn generate_table_interfaces(

@@ -10,7 +10,7 @@ pub fn col_type(pg_type: &str) -> TypeRef {
         "varchar" | "char(n)" | "text" | "name" => TypeRef::named(TypeRef::STRING),
         "char" => TypeRef::named(TypeRef::STRING),
         "int2" | "smallserial" | "smallint" => TypeRef::named(TypeRef::INT),
-        "int" | "int4" | "serial" => TypeRef::named(TypeRef::INT),
+        "integer" | "int" | "int4" | "serial" => TypeRef::named(TypeRef::INT),
         "int8" | "bigserial" | "bigint" => TypeRef::named(TypeRef::INT),
         "float4" | "real" => TypeRef::named(TypeRef::FLOAT),
         "float8" | "double precision" => TypeRef::named(TypeRef::FLOAT),
@@ -37,7 +37,7 @@ pub fn reflective_get(row: &Row, index: usize) -> String {
             let v = row.get::<_, Option<i16>>(index);
             v.map(|v| v.to_string())
         }
-        "int" | "int4" | "serial" => {
+        "integer" | "int" | "int4" | "serial" => {
             let v = row.get::<_, Option<i32>>(index);
             v.map(|v| v.to_string())
         }
@@ -61,5 +61,5 @@ pub fn reflective_get(row: &Row, index: usize) -> String {
         }
         &_ => Some("CANNOT PARSE".to_string()),
     };
-    value.unwrap_or("null".to_string())
+    value.unwrap_or("NULL".to_string())
 }

@@ -46,7 +46,8 @@ async fn main() -> Result<()> {
 
     // register objects for tables
     let interfaces = graphql_schema::generate_table_interfaces(tables.clone());
-    let objects = graphql_schema::generate_table_schemas(interfaces, tables.clone());
+    let objects =
+        graphql_schema::generate_table_schemas(interfaces, tables.clone(), &client).await?;
     for object in objects {
         dyn_schema = dyn_schema.register(object);
     }

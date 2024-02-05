@@ -1,7 +1,4 @@
-use std::{
-    collections::{BTreeMap, HashMap},
-    env,
-};
+use std::{collections::BTreeMap, env};
 
 use anyhow::Result;
 use tokio_postgres::{Client, NoTls};
@@ -72,7 +69,7 @@ pub async fn get_tables(client: &Client) -> Result<BTreeMap<String, Vec<(String,
 }
 
 #[allow(dead_code)]
-pub async fn get_relations(client: &Client) -> Result<HashMap<String, Vec<(String, String)>>> {
+pub async fn get_relations(client: &Client) -> Result<BTreeMap<String, Vec<(String, String)>>> {
     let relations = client
         .query(
             r#"
@@ -104,7 +101,7 @@ pub async fn get_relations(client: &Client) -> Result<HashMap<String, Vec<(Strin
         .collect::<Vec<_>>();
 
     // group by table name
-    let mut relations = HashMap::<String, Vec<(String, String)>>::new();
+    let mut relations = BTreeMap::<String, Vec<(String, String)>>::new();
     for (table, foreign_table) in relation_by_tables {
         let mut found = false;
         for (table_name, foreign_tables) in relations.iter_mut() {
